@@ -85,6 +85,7 @@ static struct option cli_long_options[] = {
     {"dump-all", 0, 0, CLI_DUMP + 'a'},
     {"dump-all-in", 0, 0, CLI_DUMP + 'I'},
     {"dump-all-out", 0, 0, CLI_DUMP + 'O'},
+    {"dump-file", 1, 0, CLI_DUMP + 'f'},
     {"first-message", 1, 0, '1'},
     {"first-message-file", 1, 0, 'F'},
     {"help", 0, 0, 'E'},
@@ -219,7 +220,8 @@ main(int argc, char **argv) {
                                           .ssl_enable = 0,
                                           .ssl_cert = "cert.pem",
                                           .ssl_key = "key.pem",
-                                          .write_combine = WRCOMB_ON};
+                                          .write_combine = WRCOMB_ON,
+                                          .dump_fp = stderr};
     struct rate_modulator rate_modulator = {.state = RM_UNMODULATED};
     int unescape_message_data = 0;
 
@@ -334,6 +336,14 @@ main(int argc, char **argv) {
         case CLI_DUMP + 'O': /* --dump-all-out */
             engine_params.dump_setting |= DS_DUMP_ALL_OUT;
             break;
+        case CLI_DUMP + 'f': { /* --dump-file */
+            FILE *fp = fopen(optarg, "w");
+            if(!fp) {
+                fprintf(stderr, "Failed to open dump file\n");
+                exit(EX_USAGE);
+            }
+            engine_params.dump_fp = fp;
+        } break;
         case 'c':
             conf.max_connections = parse_with_multipliers(
                 option, optarg, km_multiplier,
@@ -1156,6 +1166,12 @@ main(int argc, char **argv) {
     fprintf(stderr, "%s", tcpkali_clear_eol());
     engine_terminate(eng, oc_args.checkpoint.epoch_start,
                      oc_args.checkpoint.initial_traffic_stats, &latency_percentiles);
+
+    /* ensure dump file is flushed */
+    if(engine_params.dump_fp != stderr) {
+        fclose(engine_params.dump_fp);
+        engine_params.dump_fp = stderr;
+    }
 
     /* Send zeroes, otherwise graphs would continue showing non-zeroes... */
     report_to_statsd(statsd, 0, requested_latency_types, &latency_percentiles);

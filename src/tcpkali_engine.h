@@ -85,6 +85,7 @@ struct engine_params {
         DS_DUMP_ALL_OUT = 8,
         DS_DUMP_ALL = 12 /* 8|4 */
     } dump_setting;
+    FILE *dump_fp;
     statsd_report_latency_types latency_setting;
     int latency_marker_skip;        /* --latency-marker-skip <N> */
     int message_marker;             /* \{message.marker} */

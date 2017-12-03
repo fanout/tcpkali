@@ -219,11 +219,11 @@ static void largest_contiguous_chunk(struct loop_arguments *largs,
                                      size_t *available_header,
                                      size_t *available_body);
 static void debug_dump_data(const char *prefix, int fd, const void *data,
-                            size_t size, ssize_t limit);
+                            size_t size, ssize_t limit, FILE *outfp);
 static void debug_dump_data_highlight(const char *prefix, int fd,
                                       const void *data, size_t size,
-                                      ssize_t limit, size_t hl_offset,
-                                      size_t hl_length);
+                                      ssize_t limit, FILE *outfp,
+                                      size_t hl_offset, size_t hl_length);
 static void
 latency_record_incoming_ts(TK_P_ struct connection *conn, char *buf,
                            size_t size);
@@ -1074,7 +1074,8 @@ single_engine_loop_thread(void *argp) {
      */
     if(largs->params.verbosity_level >= DBG_DETAIL) {
         debug_dump_data("Last received bytes ", -1, largs->scratch_recv_buf,
-                        largs->scratch_recv_last_size, -1500);
+                        largs->scratch_recv_last_size, -1500,
+                        largs->params.dump_fp);
     }
 
     pthread_mutex_unlock(largs->serialize_output_lock);
@@ -1835,13 +1836,13 @@ accept_cb(TK_P_ tk_io *w, int UNUSED revents) {
  */
 static void
 debug_dump_data(const char *prefix, int fd, const void *data, size_t size,
-                ssize_t limit) {
-    debug_dump_data_highlight(prefix, fd, data, size, limit, 0, 0);
+                ssize_t limit, FILE *outfp) {
+    debug_dump_data_highlight(prefix, fd, data, size, limit, outfp, 0, 0);
 }
 static void
 debug_dump_data_highlight(const char *prefix, int fd, const void *data,
-                          size_t size, ssize_t limit, size_t hl_offset,
-                          size_t hl_length) {
+                          size_t size, ssize_t limit, FILE *outfp,
+                          size_t hl_offset, size_t hl_length) {
     /*
      * Do not show more than (limit) first bytes,
      * or more than (-limit) last bytes of the buffer.
@@ -1880,7 +1881,7 @@ debug_dump_data_highlight(const char *prefix, int fd, const void *data,
     } else {
         fdnumbuf[0] = '\0';
     }
-    fprintf(stderr, "%s%s(%s%ld): %s%s[%s%s%s]%s%s\n", tcpkali_clear_eol(),
+    fprintf(outfp, "%s%s(%s%ld): %s%s[%s%s%s]%s%s\n", tcpkali_clear_eol(),
             prefix, fdnumbuf, (long)original_size, preceding ? "..." : "",
             tk_attr(*prefix == 'S' ? TKA_SndBrace : TKA_RcvBrace),
             tk_attr(TKA_NORMAL),
@@ -1888,6 +1889,7 @@ debug_dump_data_highlight(const char *prefix, int fd, const void *data,
                                      hl_length),
             tk_attr(*prefix == 'S' ? TKA_SndBrace : TKA_RcvBrace),
             tk_attr(TKA_NORMAL), following ? "..." : "");
+    fflush(outfp);
     if(buffer != stack_buffer) free(buffer);
 }
 
@@ -2059,7 +2061,7 @@ passive_websocket_cb(TK_P_ tk_io *w, int revents) {
                || ((largs->params.dump_setting & DS_DUMP_ONE_IN)
                    && largs->dump_connect_fd == tk_fd(w))) {
                 debug_dump_data("Rcv", tk_fd(w), largs->scratch_recv_buf, rd,
-                                0);
+                                0, largs->params.dump_fp);
             }
             latency_record_incoming_ts(TK_A_ conn, largs->scratch_recv_buf, rd);
 
@@ -2332,7 +2334,7 @@ scan_incoming_bytes(TK_P_ struct connection *conn, char *buf, size_t size) {
             /* Length of --message-stop. */
             size_t needle_tail_in_scope = analyzed > needlen ? needlen : analyzed;
             debug_dump_data_highlight(
-                "Last packet", -1, buf, size, 0,
+                "Last packet", -1, buf, size, 0, largs->params.dump_fp,
                 analyzed > needlen ? analyzed - needlen : 0,
                 needle_tail_in_scope);
             char stop_msg[PRINTABLE_DATA_SUGGESTED_BUFFER_SIZE(needlen)];
@@ -2624,7 +2626,7 @@ connection_cb(TK_P_ tk_io *w, int revents) {
                    || ((largs->params.dump_setting & DS_DUMP_ONE_IN)
                        && largs->dump_connect_fd == tk_fd(w))) {
                     debug_dump_data("Rcv", tk_fd(w), largs->scratch_recv_buf,
-                                    rd, 0);
+                                    rd, 0, largs->params.dump_fp);
                 }
                 latency_record_incoming_ts(TK_A_ conn, largs->scratch_recv_buf,
                                            rd);
@@ -2748,7 +2750,8 @@ process_WRITE:
                 if(largs->params.dump_setting & DS_DUMP_ALL_OUT
                    || ((largs->params.dump_setting & DS_DUMP_ONE_OUT)
                        && largs->dump_connect_fd == tk_fd(w))) {
-                    debug_dump_data("Snd", tk_fd(w), position, wrote, 0);
+                    debug_dump_data("Snd", tk_fd(w), position, wrote, 0,
+                                    largs->params.dump_fp);
                 }
                 if((size_t)wrote > available_header) {
                     position += wrote;
